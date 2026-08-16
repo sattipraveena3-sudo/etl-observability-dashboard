@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
+
 
 @dataclass
 class QualityResult:
@@ -36,17 +38,17 @@ def check_quality(
     duplicate_rate = duplicates / max(rows_out, 1)
     row_delta = abs(rows_out - historical_average) / max(historical_average, 1)
     breached: list[str] = []
-    if null_rate > 0.08:
+    if null_rate > settings.null_rate_threshold:
         breached.append("null_rate")
-    if duplicate_rate > 0.04:
+    if duplicate_rate > settings.duplicate_rate_threshold:
         breached.append("duplicate_rate")
-    if row_delta > 0.35:
+    if row_delta > settings.row_delta_threshold:
         breached.append("row_count")
     return QualityResult(null_rate, duplicate_rate, row_delta, breached)
 
 
 class Store:
-    def __init__(self, path: str | Path = "data/metrics.db"):
+    def __init__(self, path: str | Path = settings.database_path):
         self.path = str(path)
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.setup()
@@ -87,6 +89,14 @@ class Store:
             )
             conn.execute("create index if not exists idx_runs_job_created on runs(job, created desc)")
             conn.execute("create index if not exists idx_alerts_created on alerts(created desc)")
+
+    def ping(self) -> bool:
+        try:
+            with self.connect() as conn:
+                conn.execute("select 1").fetchone()
+            return True
+        except sqlite3.Error:
+            return False
 
     def add_run(self, run: tuple[Any, ...]) -> int:
         with self.connect() as conn:
@@ -155,6 +165,17 @@ class Store:
                 )
             ]
 
+    def job_runs(self, job: str, limit: int = 100) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 1000))
+        with self.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    "select * from runs where job = ? order by created desc limit ?",
+                    (job, limit),
+                )
+            ]
+
     def historical_average(self, job: str, limit: int = 20) -> float:
         with self.connect() as conn:
             rows = conn.execute(
@@ -191,13 +212,25 @@ class Store:
         for run in runs:
             item = jobs.setdefault(
                 run["job"],
-                {"job": run["job"], "runs": 0, "failures": 0, "latest_status": None, "latest_created": 0},
+                {
+                    "job": run["job"],
+                    "runs": 0,
+                    "failures": 0,
+                    "latest_status": None,
+                    "latest_created": 0,
+                    "avg_duration": 0.0,
+                    "_duration_sum": 0.0,
+                },
             )
             item["runs"] += 1
             item["failures"] += int(run["status"] != "success")
+            item["_duration_sum"] += run["duration"]
             if run["created"] >= item["latest_created"]:
                 item["latest_status"] = run["status"]
                 item["latest_created"] = run["created"]
+
+        for item in jobs.values():
+            item["avg_duration"] = round(item.pop("_duration_sum") / item["runs"], 2)
 
         success_count = sum(1 for run in runs if run["status"] == "success")
         return {
@@ -207,6 +240,19 @@ class Store:
             "p95_duration": round(durations[p95_idx], 2),
             "active_alerts": len(alerts),
             "jobs": sorted(jobs.values(), key=lambda x: x["job"]),
+        }
+
+    def metrics(self) -> dict[str, float | int]:
+        with self.connect() as conn:
+            total_runs = conn.execute("select count(*) from runs").fetchone()[0]
+            failed_runs = conn.execute("select count(*) from runs where status != 'success'").fetchone()[0]
+            total_alerts = conn.execute("select count(*) from alerts").fetchone()[0]
+            avg_duration = conn.execute("select coalesce(avg(duration), 0) from runs").fetchone()[0]
+        return {
+            "runs_total": int(total_runs),
+            "runs_failed_total": int(failed_runs),
+            "alerts_total": int(total_alerts),
+            "run_duration_seconds_avg": round(float(avg_duration), 4),
         }
 
 
@@ -245,6 +291,10 @@ def evaluate_observation(
     if status != "success":
         alert_messages.append("job execution failed")
         store.alert(job, "critical", "job execution failed", created)
+    if duration > settings.slow_run_seconds:
+        message = f"slow run: {duration:.1f}s exceeds {settings.slow_run_seconds:.1f}s"
+        alert_messages.append(message)
+        store.alert(job, "warning", message, created)
     if quality.breached:
         message = "quality breach: " + ", ".join(quality.breached)
         alert_messages.append(message)
