@@ -1,50 +1,88 @@
-# ETL Pipeline Observability Dashboard
+# ETL Observability Dashboard
 
-I built this project to demonstrate run-level observability for Glue/PySpark-style ETL systems. A configurable simulator produces normal, slow, failed, schema-drifted, and low-quality runs. SQLite stores run history and alerts; FastAPI exposes metrics; Plotly presents duration trends and alert history.
+A production-style portfolio project for monitoring ETL pipeline reliability. It captures run telemetry, evaluates data quality and schema drift, persists run/alert history, exposes a FastAPI ingestion API, and renders an auto-refreshing operations dashboard.
 
-`simulator → quality + schema checks → SQLite → FastAPI → dashboard`
+`ETL job → telemetry ingestion → quality + drift evaluation → SQLite → FastAPI → live dashboard`
 
-## Run
+## What it monitors
+
+- Pipeline success/failure state
+- Runtime trends and p95 duration
+- Input/output row volumes
+- Null-rate and duplicate-rate quality checks
+- Row-count anomaly detection against recent job history
+- Schema additions, removals, and type changes
+- Alert history across failures, quality breaches, and schema drift
+- Per-job health summaries
+
+## Run locally
 
 ```bash
 docker compose up --build
 ```
 
-Open `http://localhost:8000` and click **Generate demo runs**. A healthy run has stable duration and row counts, null rate below 8%, duplicates below 4%, and no schema difference. Alerts use a pluggable storage boundary that can be replaced by Slack or email delivery.
+Open `http://localhost:8000`.
 
-## Tests
+The dashboard refreshes automatically every 10 seconds. Click **Generate demo telemetry** to populate realistic sample runs, or send telemetry from a real ETL job through the API.
 
-`pip install -r requirements.txt && pytest`
-
-## Limitations and roadmap
-
-This monitors simulated jobs rather than a live Glue account. I would next add OpenTelemetry ingestion, Postgres, webhook delivery, baseline windows per job, seasonality-aware thresholds, authentication, and real Spark listeners.
-
-## Suggested commits
-
-1. `set up observability service`
-2. `add SQLite metrics store`
-3. `implement realistic ETL simulator`
-4. `add schema drift detection`
-5. `add quality threshold checks`
-6. `persist alert history`
-7. `add FastAPI metrics endpoints`
-8. `build Plotly operations dashboard`
-9. `add detector and alert tests`
-10. `add Docker Compose setup`
-11. `document pipeline health model`
-
-## GitHub CLI
+## Ingest a real ETL run
 
 ```bash
-git init -b main
-git add app/core.py && git commit -m "add metrics store and ETL simulator"
-git add app/main.py app/static && git commit -m "add API and dashboard"
-git add tests requirements.txt && git commit -m "add observability tests"
-git add Dockerfile docker-compose.yml && git commit -m "add Docker Compose setup"
-git add README.md && git commit -m "document pipeline health model"
-gh repo create etl-observability-dashboard --public --source=. --remote=origin
-git push -u origin main
+curl -X POST http://localhost:8000/api/runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "job": "orders_etl",
+    "status": "success",
+    "duration": 42.7,
+    "rows_in": 10500,
+    "rows_out": 10220,
+    "null_rate": 0.012,
+    "duplicate_rate": 0.003,
+    "schema": {"id": "int", "value": "float", "source": "string"}
+  }'
 ```
 
-MIT licensed. Research and portfolio demonstration.
+You can wire this endpoint into Airflow, AWS Glue, dbt orchestration, Spark jobs, cron-based pipelines, or any ETL system that can make an HTTP request after a run.
+
+## API
+
+- `GET /health` — service health
+- `GET /api/summary` — dashboard KPIs and per-job health
+- `GET /api/runs` — recent pipeline runs
+- `GET /api/alerts` — recent alerts
+- `POST /api/runs` — ingest real pipeline telemetry
+- `POST /api/simulate` — generate demo telemetry
+- `GET /docs` — interactive OpenAPI documentation
+
+## Quality model
+
+Default thresholds:
+
+- null rate: `<= 8%`
+- duplicate rate: `<= 4%`
+- output row deviation from recent job average: `<= 35%`
+
+These values are deliberately simple and visible for a portfolio implementation. In a production deployment, thresholds should be configurable per dataset/job and may incorporate seasonality or SLA windows.
+
+## Tests and CI
+
+```bash
+pip install -r requirements.txt
+pytest -q
+```
+
+GitHub Actions automatically runs the test suite and builds the Docker image on pull requests and updates to `main`.
+
+## Architecture
+
+- **FastAPI** for telemetry ingestion and metrics APIs
+- **SQLite** for lightweight persistent run and alert history
+- **Plotly** for interactive runtime visualization
+- **Docker / Compose** for repeatable deployment
+- **GitHub Actions** for automated validation
+
+## Production extensions
+
+Natural next steps are PostgreSQL/TimescaleDB storage, authentication, webhook/Slack alert delivery, OpenTelemetry ingestion, per-job configurable thresholds, Airflow/Glue adapters, and Prometheus-compatible metrics.
+
+MIT licensed. Built as a data engineering / observability portfolio project.
