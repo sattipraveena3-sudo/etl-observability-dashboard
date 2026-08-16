@@ -1,1 +1,80 @@
-<!doctype html><html><head><meta charset="utf-8"><script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script><style>body{font:15px system-ui;background:#07130f;color:#e8fff5;max-width:1100px;margin:auto;padding:30px}button{padding:12px 20px;background:#6ee7b7;border:0;border-radius:30px}.card{background:#10231d;padding:20px;border-radius:15px;margin:15px 0}table{width:100%;border-collapse:collapse}td,th{padding:9px;border-bottom:1px solid #285043;text-align:left}</style></head><body><h1>ETL Pipeline Observability</h1><button id="run">Generate demo runs</button><div class="card" id="chart"></div><div class="card"><h2>Alerts</h2><table id="alerts"></table></div><script>async function load(){const runs=await(await fetch('/runs')).json();Plotly.newPlot('chart',[{x:runs.map(x=>new Date(x.created*1000)),y:runs.map(x=>x.duration),mode:'lines+markers',name:'duration'}],{paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#cff5e5'}});const a=await(await fetch('/alerts')).json();alerts.innerHTML='<tr><th>Job</th><th>Level</th><th>Message</th></tr>'+a.map(x=>`<tr><td>${x.job}</td><td>${x.level}</td><td>${x.message}</td></tr>`).join('')}run.onclick=async()=>{await fetch('/simulate',{method:'POST'});load()};load()</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETL Observability Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root{color-scheme:dark;--bg:#07110d;--panel:#0f1d17;--panel2:#14261f;--text:#ecfff7;--muted:#8fb5a5;--line:#24483a;--good:#5ee1a1;--warn:#f5c451;--bad:#ff7777;--accent:#75f0ba}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top,#123025 0,#07110d 42%);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+    .wrap{max-width:1280px;margin:auto;padding:28px}.top{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;margin-bottom:22px}.eyebrow{color:var(--accent);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:12px}.title{font-size:34px;margin:7px 0 8px}.subtitle{margin:0;color:var(--muted);max-width:760px;line-height:1.6}.actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:10px 15px;border-radius:10px;cursor:pointer;font-weight:700}.btn.primary{background:var(--accent);color:#052117;border-color:transparent}.status{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;margin-top:10px;justify-content:flex-end}.dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 12px var(--good)}
+    .grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:14px}.card{background:linear-gradient(180deg,rgba(20,38,31,.96),rgba(13,28,22,.96));border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 18px 45px rgba(0,0,0,.18)}.kpi-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}.kpi-value{font-size:27px;font-weight:800;margin-top:7px}.two{grid-template-columns:1.5fr 1fr}.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.section-title h2{font-size:16px;margin:0}.pill{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:5px 8px;color:var(--muted)}.chart{height:330px}.table-wrap{overflow:auto;max-height:390px}table{width:100%;border-collapse:collapse}th,td{padding:10px 8px;text-align:left;border-bottom:1px solid rgba(36,72,58,.75);white-space:nowrap}th{position:sticky;top:0;background:#102018;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700}.success{color:var(--good);background:rgba(94,225,161,.12)}.failed,.critical{color:var(--bad);background:rgba(255,119,119,.12)}.warning{color:var(--warn);background:rgba(245,196,81,.12)}.empty{color:var(--muted);padding:20px 0}.foot{margin-top:16px;color:var(--muted);font-size:12px;text-align:center}
+    @media(max-width:950px){.kpis{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}.top{flex-direction:column}.actions,.status{justify-content:flex-start}}@media(max-width:560px){.wrap{padding:18px}.kpis{grid-template-columns:1fr}.title{font-size:28px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">Data Reliability Console</div>
+      <h1 class="title">ETL Observability Dashboard</h1>
+      <p class="subtitle">Monitor pipeline health, runtime performance, row-volume anomalies, data-quality violations, schema drift, and failed jobs from one live operations view.</p>
+    </div>
+    <div>
+      <div class="actions">
+        <button class="btn" id="refresh">Refresh</button>
+        <button class="btn primary" id="simulate">Generate demo telemetry</button>
+      </div>
+      <div class="status"><span class="dot"></span><span id="refreshLabel">Auto-refresh every 10s</span></div>
+    </div>
+  </div>
+
+  <div class="grid kpis">
+    <div class="card"><div class="kpi-label">Runs in window</div><div class="kpi-value" id="totalRuns">—</div></div>
+    <div class="card"><div class="kpi-label">Success rate</div><div class="kpi-value" id="successRate">—</div></div>
+    <div class="card"><div class="kpi-label">Average duration</div><div class="kpi-value" id="avgDuration">—</div></div>
+    <div class="card"><div class="kpi-label">P95 duration</div><div class="kpi-value" id="p95Duration">—</div></div>
+    <div class="card"><div class="kpi-label">Alerts</div><div class="kpi-value" id="activeAlerts">—</div></div>
+  </div>
+
+  <div class="grid two">
+    <div class="card">
+      <div class="section-title"><h2>Runtime trend</h2><span class="pill">latest 200 runs</span></div>
+      <div id="runtimeChart" class="chart"></div>
+    </div>
+    <div class="card">
+      <div class="section-title"><h2>Job health</h2><span class="pill">current window</span></div>
+      <div class="table-wrap"><table id="jobsTable"></table></div>
+    </div>
+  </div>
+
+  <div class="grid two" style="margin-top:14px">
+    <div class="card">
+      <div class="section-title"><h2>Recent runs</h2><span class="pill">quality + volume</span></div>
+      <div class="table-wrap"><table id="runsTable"></table></div>
+    </div>
+    <div class="card">
+      <div class="section-title"><h2>Alert stream</h2><span class="pill">failures, quality, drift</span></div>
+      <div class="table-wrap"><table id="alertsTable"></table></div>
+    </div>
+  </div>
+  <div class="foot">FastAPI · SQLite · Plotly · Docker · GitHub Actions</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const fmtTime=t=>new Date(t*1000).toLocaleString();
+const pct=n=>`${(n*100).toFixed(1)}%`;
+const secs=n=>`${Number(n||0).toFixed(1)}s`;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
+async function getJson(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);return r.json()}
+function badge(text){const cls=text==='success'?'success':text==='failed'?'failed':text==='critical'?'critical':'warning';return `<span class="badge ${cls}">${esc(text)}</span>`}
+function renderJobs(jobs){$('jobsTable').innerHTML='<tr><th>Job</th><th>Status</th><th>Runs</th><th>Failures</th></tr>'+jobs.map(j=>`<tr><td>${esc(j.job)}</td><td>${badge(j.latest_status)}</td><td>${j.runs}</td><td>${j.failures}</td></tr>`).join('')||'<tr><td class="empty">No telemetry yet.</td></tr>'}
+function renderRuns(runs){$('runsTable').innerHTML='<tr><th>Job</th><th>Status</th><th>Duration</th><th>Rows</th><th>Nulls</th><th>Duplicates</th><th>Time</th></tr>'+runs.slice(0,60).map(r=>`<tr><td>${esc(r.job)}</td><td>${badge(r.status)}</td><td>${secs(r.duration)}</td><td>${Number(r.rows_out).toLocaleString()}</td><td>${pct(r.null_rate)}</td><td>${pct(r.duplicate_rate)}</td><td>${fmtTime(r.created)}</td></tr>`).join('')}
+function renderAlerts(alerts){$('alertsTable').innerHTML='<tr><th>Level</th><th>Job</th><th>Message</th><th>Time</th></tr>'+alerts.slice(0,80).map(a=>`<tr><td>${badge(a.level)}</td><td>${esc(a.job)}</td><td>${esc(a.message)}</td><td>${fmtTime(a.created)}</td></tr>`).join('')||'<tr><td class="empty">No alerts detected.</td></tr>'}
+function renderChart(runs){const ordered=[...runs].reverse();const byJob={};ordered.forEach(r=>(byJob[r.job]??=[]).push(r));const traces=Object.entries(byJob).map(([job,items])=>({x:items.map(x=>new Date(x.created*1000)),y:items.map(x=>x.duration),mode:'lines+markers',name:job,hovertemplate:'%{y:.1f}s<extra>'+job+'</extra>'}));Plotly.react('runtimeChart',traces,{margin:{l:45,r:15,t:10,b:45},paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#b9d7cb'},xaxis:{gridcolor:'#1d3b30'},yaxis:{title:'seconds',gridcolor:'#1d3b30'},legend:{orientation:'h'}},{displayModeBar:false,responsive:true})}
+async function load(){try{const [summary,runs,alerts]=await Promise.all([getJson('/api/summary'),getJson('/api/runs'),getJson('/api/alerts')]);$('totalRuns').textContent=summary.total_runs;$('successRate').textContent=pct(summary.success_rate);$('avgDuration').textContent=secs(summary.avg_duration);$('p95Duration').textContent=secs(summary.p95_duration);$('activeAlerts').textContent=summary.active_alerts;renderJobs(summary.jobs);renderRuns(runs);renderAlerts(alerts);renderChart(runs);$('refreshLabel').textContent=`Updated ${new Date().toLocaleTimeString()} · auto-refresh every 10s`}catch(e){$('refreshLabel').textContent=`Refresh failed: ${e.message}`}}
+$('refresh').onclick=load;$('simulate').onclick=async()=>{await getJson('/api/simulate?count=36',{method:'POST'});load()};load();setInterval(load,10000);
+</script>
+</body>
+</html>
